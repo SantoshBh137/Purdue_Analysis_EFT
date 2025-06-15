@@ -22,9 +22,7 @@ observable_labels = {
     "ttbar_rapidity": r"$y^{t\bar{t}}$", "ttbar_eta": r"$\eta^{t\bar{t}}$",
     "ttbar_delta_phi": r"$\Delta\phi_{t\bar{t}}$", "ttbar_delta_eta": r"$\Delta\eta_{t\bar{t}}$",
     "gen_ttbar_mass": r"$m_{t\bar{t}}$"
-    
 }
-
 
 class ObservablePlotter:
     def __init__(self, file_dict, plot_dir="plots"):
@@ -34,20 +32,39 @@ class ObservablePlotter:
 
     def plot(self, observable, step=0, include_uncertainty=False, save_name=None, binning_dict=None):
         assert step in [0, 8], "step must be 0 (GEN) or 8 (RECO)"
-
         tree_name = f"ttBar_treeVariables_step{step}"
         obs_prefix = "gen_" if step == 0 else ""
         obs_name = obs_prefix + observable
 
         obs_dict = {}
         weights = {}
+
         for label, file in self.file_dict.items():
             with uproot.open(file) as f:
                 tree = f[tree_name]
                 obs = tree[obs_name].array()
-                wgt = tree["final_weight"].array()
-                obs_dict[label] = ak.to_numpy(obs)
-                weights[label] = ak.to_numpy(wgt)
+                obs_np = ak.to_numpy(obs)
+        
+                if "final_weight" in tree.keys():
+                    weight = ak.to_numpy(tree["final_weight"].array())
+                    print(f"[INFO] '{label}' uses 'final_weight'")
+        
+                elif "finalWeight" in tree.keys():
+                    final_w = ak.to_numpy(tree["finalWeight"].array())
+                    if step == 0:
+                        base_w = ak.to_numpy(tree["trueLevelWeight"].array())
+                        weight = final_w * base_w
+                        print(f"[INFO] '{label}' uses 'finalWeight × trueLevelWeight'")
+                    else:
+                        base_w = ak.to_numpy(tree["eventWeight"].array())
+                        weight = final_w * base_w
+                        print(f"[INFO] '{label}' uses 'finalWeight × eventWeight'")
+                else:
+                    raise ValueError(f"No valid weight branch found in file '{file}'")
+        
+                obs_dict[label] = obs_np
+                weights[label] = weight
+
 
         fig, (ax, ax_ratio) = plt.subplots(2, 1, gridspec_kw={'height_ratios': [3, 1]}, sharex=True, figsize=(10, 8))
         colors = ['black', 'red', 'blue', 'green']

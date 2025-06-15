@@ -42,8 +42,6 @@ class EFTReweighter:
         self.weights_step0, self.weights_step8 = self._compute_file_weights()
         self.final_observables_gen = {}
         self.final_observables_reco = {}
-        self.true_weights_gen = None
-        self.event_weights_reco = None
         self.structure_constants_gen = None
         self.structure_constants_reco = None
 
@@ -64,6 +62,11 @@ class EFTReweighter:
             for f in files:
                 weights_step0[f] = self.cross_sections[region] / total_events_step0 if total_events_step0 > 0 else 0
                 weights_step8[f] = self.cross_sections[region] / total_events_step8 if total_events_step8 > 0 else 0
+
+        max_step0 = max(weights_step0.values()) if weights_step0 else 1
+        max_step8 = max(weights_step8.values()) if weights_step8 else 1
+        weights_step0 = {k: v / max_step0 for k, v in weights_step0.items()}
+        weights_step8 = {k: v / max_step8 for k, v in weights_step8.items()}
 
         return weights_step0, weights_step8
 
@@ -103,23 +106,18 @@ class EFTReweighter:
 
     def load_observables(self):
         collected_gen, collected_reco = [], []
-        true_weights_gen, event_weights_reco = [], []
 
         for file_path in tqdm(self.file_paths, desc="Loading observables", unit="file"):
             with uproot.open(file_path) as file:
-                # GEN
                 gen_tree = file["ttBar_treeVariables_step0"]
                 gen_keys = [k for k in gen_tree.keys() if k.startswith("gen_")]
                 arrays = gen_tree.arrays(gen_keys + ["trueLevelWeight"])
-                collected_gen.append({k: arrays[k] for k in gen_keys})
-                true_weights_gen.append(arrays["trueLevelWeight"])
+                collected_gen.append({k: arrays[k] for k in arrays.fields})
 
-                # RECO
                 reco_tree = file["ttBar_treeVariables_step8"]
                 reco_keys = [k for k in reco_tree.keys() if not k.startswith("gen_")]
                 arrays = reco_tree.arrays(reco_keys + ["eventWeight"])
-                collected_reco.append({k: arrays[k] for k in reco_keys})
-                event_weights_reco.append(arrays["eventWeight"])
+                collected_reco.append({k: arrays[k] for k in arrays.fields})
 
         self.collected_gen = collected_gen
         self.collected_reco = collected_reco
@@ -127,12 +125,10 @@ class EFTReweighter:
         self.final_observables_gen = {
             k: ak.concatenate([obs[k] for obs in collected_gen]) for k in collected_gen[0].keys()
         }
-        self.true_weights_gen = ak.concatenate(true_weights_gen)
 
         self.final_observables_reco = {
             k: ak.concatenate([obs[k] for obs in collected_reco]) for k in collected_reco[0].keys()
         }
-        self.event_weights_reco = ak.concatenate(event_weights_reco)
 
     def _base_weights(self, observables_list, file_weight_dict):
         example_key = next(iter(observables_list[0]))
@@ -145,11 +141,11 @@ class EFTReweighter:
         if step == 0:
             eft_weight = Event_weight_prediction1.event_weights_lin_quad(self.structure_constants_gen, wc_point)[-1]
             base = self._base_weights(self.collected_gen, self.weights_step0)
-            return base * self.true_weights_gen * eft_weight
+            return base * eft_weight
         elif step == 8:
             eft_weight = Event_weight_prediction1.event_weights_lin_quad(self.structure_constants_reco, wc_point)[-1]
             base = self._base_weights(self.collected_reco, self.weights_step8)
-            return base * self.event_weights_reco * eft_weight
+            return base * eft_weight
         else:
             raise ValueError("step must be 0 or 8")
 
@@ -163,28 +159,28 @@ class EFTReweighter:
                 return ak.to_numpy(arr)
             except Exception:
                 return arr
-        
-       # Explicitly exclude weight-related branches
-        excluded_gen_keys = {"trueLevelWeight", "mgWeights"}
-        excluded_reco_keys = {"eventWeight", "mgWeights"}
-    
+
+        excluded_gen_keys = {"mgWeights"}
+        excluded_reco_keys = {"mgWeights"}
+
         masked_gen = {
-            k: v[mask_gen] for k, v in self.final_observables_gen.items()
-            if k not in excluded_gen_keys
+            k: v[mask_gen] for k, v in self.final_observables_gen.items() if k not in excluded_gen_keys
         }
+
         masked_reco = {
-            k: v[mask_reco] for k, v in self.final_observables_reco.items()
-            if k not in excluded_reco_keys
+            k: v[mask_reco] for k, v in self.final_observables_reco.items() if k not in excluded_reco_keys
         }
-        
-        print("Computing weights for GEN...")
+
+        print("Computing final weights...")
         weights_gen = self.get_final_weights(wc_point, step=0)[mask_gen]
-        print("Computing weights for RECO...")
         weights_reco = self.get_final_weights(wc_point, step=8)[mask_reco]
-        
+
+        masked_gen['finalWeight'] = ak.to_numpy(weights_gen)
+        masked_reco['finalWeight'] = ak.to_numpy(weights_reco)
+
         print(f"Saving masked arrays and weights to {output_file}...")
         with uproot.recreate(output_file) as f:
-            masked_gen['final_weight'] = ak.to_numpy(weights_gen)
-            masked_reco['final_weight'] = ak.to_numpy(weights_reco)
             f["ttBar_treeVariables_step0"] = {k: convert_array(v) for k, v in masked_gen.items()}
+            print("step0 is done")
             f["ttBar_treeVariables_step8"] = {k: convert_array(v) for k, v in masked_reco.items()}
+            print("step8 is done")
