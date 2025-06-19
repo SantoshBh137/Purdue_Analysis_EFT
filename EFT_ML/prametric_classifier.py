@@ -158,14 +158,21 @@ def train_model(X_train, Y_train, X_val, Y_val, input_dim, n_epochs):
     return model, device
 
 # Likelihood ratio plot
+
 def plot_llr_2d(model, scaler, vars_all, x_var, y_var, x_range, y_range, bins=60):
     xi, yi = vars_all.index(x_var), vars_all.index(y_var)
-    xs = np.linspace(*x_range, bins)
-    ys = np.linspace(*y_range, bins)
-    grid = np.array(np.meshgrid(xs, ys)).reshape(2, -1).T
+    xs = np.linspace(*x_range, bins + 1)  # +1 for bin edges
+    ys = np.linspace(*y_range, bins + 1)
+    x_centers = 0.5 * (xs[:-1] + xs[1:])
+    y_centers = 0.5 * (ys[:-1] + ys[1:])
+    xx, yy = np.meshgrid(x_centers, y_centers)
+    grid = np.column_stack([xx.ravel(), yy.ravel()])
 
-    Xgrid = np.zeros((len(grid), len(vars_all)))
-    Xgrid[:, xi], Xgrid[:, yi] = grid[:, 0], grid[:, 1]
+    # Use mean for non-swept features
+    Xgrid = np.tile(scaler.mean_, (len(grid), 1))
+    Xgrid[:, xi] = grid[:, 0]
+    Xgrid[:, yi] = grid[:, 1]
+
     Xgrid_scaled = scaler.transform(Xgrid)
 
     inputs = torch.tensor(Xgrid_scaled, dtype=torch.float32).to(next(model.parameters()).device)
@@ -173,17 +180,23 @@ def plot_llr_2d(model, scaler, vars_all, x_var, y_var, x_range, y_range, bins=60
     with torch.no_grad():
         scores = torch.sigmoid(model(inputs)).cpu().numpy().flatten()
 
-    r = scores / (1 - scores + 1e-9)
-    log_r = np.log(r).reshape(bins, bins)
-    plt.figure(figsize=(8, 6))
-    plt.imshow(log_r.T, origin='lower', extent=[xs[0], xs[-1], ys[0], ys[-1]],
-               aspect='auto', cmap='bwr_r', vmin=-0.4, vmax=0.4)
-    plt.colorbar(label=r'$\log r(x|\mathrm{SM},\; c_{tG} = 2)$')
-    plt.xlabel(r'$\cos(\phi)$')
-    plt.ylabel(r'$m_{t\bar{t}}$')
+    log_r = np.log((1 - scores) / (scores + 1e-9)).reshape(bins, bins)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cmap = plt.get_cmap('bwr_r')
+    pcm = ax.pcolormesh(xs, ys, log_r, cmap='bwr_r', shading='auto', vmin=-0.4, vmax=0.4)
+    cbar = plt.colorbar(pcm, ax=ax, label=r'$\log r(x|\mathrm{SM},\; c_{tG} = 2)$')
+    ax.set_xlabel(r'$\cos(\phi)$')
+    ax.set_ylabel(r'$m_{t\bar{t}}$ [GeV]')
+    ax.set_xlim(xs[0], xs[-1])
+    ax.set_ylim(ys[0], ys[-1])
+    ax.grid(False)
     plt.tight_layout()
     plt.show()
+
     return scores, log_r
+
+
 
 # Score distribution plot
 def plot_scores(model, device, X_sig_test, X_bkg_test):
@@ -218,19 +231,24 @@ def compute_histogram_llr(x_obs, y_obs, label_obs, x_range, y_range, bins=60):
     y_obs = np.asarray(y_obs)
     label_obs = np.asarray(label_obs)
 
+    # Label: 0 = SM, 1 = EFT
     sm_mask = label_obs == 0
     eft_mask = label_obs == 1
 
-    hist_sm, _, _ = np.histogram2d(x_obs[sm_mask], y_obs[sm_mask], bins=[x_bins, y_bins], density=True)
-    hist_eft, _, _ = np.histogram2d(x_obs[eft_mask], y_obs[eft_mask], bins=[x_bins, y_bins], density=True)
+    hist_sm, _, _ = np.histogram2d(x_obs[sm_mask], y_obs[sm_mask],
+                                   bins=[x_bins, y_bins], density=True)
+    hist_eft, _, _ = np.histogram2d(x_obs[eft_mask], y_obs[eft_mask],
+                                    bins=[x_bins, y_bins], density=True)
 
     epsilon = 1e-9
     ratio = np.log((hist_sm + epsilon) / (hist_eft + epsilon))
 
+    # Plot
     plt.figure(figsize=(8, 6))
-    plt.imshow(ratio.T, origin='lower', extent=[x_bins[0], x_bins[-1], y_bins[0], y_bins[-1]],
+    plt.imshow(ratio.T, origin='lower',
+               extent=[x_bins[0], x_bins[-1], y_bins[0], y_bins[-1]],
                aspect='auto', cmap='bwr_r', vmin=-0.4, vmax=0.4)
-    plt.colorbar(label=r'$\log r(x|\mathrm{SM},\; c_{tG}=2)$')
+    plt.colorbar(label=r'$\log r(x|\mathrm{SM},\; c_{tG} = 2)$')
     plt.xlabel(r'$\cos(\phi)$')
     plt.ylabel(r'$m_{t\bar{t}}$ [GeV]')
     plt.title('Log-Likelihood Ratio (Histogram)')
@@ -238,6 +256,7 @@ def compute_histogram_llr(x_obs, y_obs, label_obs, x_range, y_range, bins=60):
     plt.show()
 
     return ratio
+
 
 # Evaluation
 def evaluate_model(model, device, X_sig_test, X_bkg_test):
