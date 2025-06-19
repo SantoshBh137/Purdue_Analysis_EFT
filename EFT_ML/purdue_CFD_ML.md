@@ -71,4 +71,5 @@ An important task in EFT analysis is to **approximate the likelihood function**,
 
 For a comprehensive guide on likelihood-based approaches using machine learning in the EFT context, refer to this Master's thesis:
 [Jonas Rübenach – Likelihood approximation using ML in EFT](https://bib-pubdb1.desy.de/record/425819/files/Jonas%20R%C3%BCbenach%20Master%20thesis.pdf)
+Also, this one [Constraining Effective Field Theories with Machine Learning] https://arxiv.org/pdf/1805.00013
 
