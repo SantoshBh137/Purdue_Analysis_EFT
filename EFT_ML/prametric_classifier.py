@@ -1,5 +1,3 @@
-# eft_likelihood_calibrated_gen_only.py (Efficient, CLI-enabled)
-
 import argparse
 import pandas as pd
 import numpy as np
@@ -13,26 +11,48 @@ from sklearn.metrics import roc_curve, auc, confusion_matrix, ConfusionMatrixDis
 from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
 
-
 # Load data
-def load_data(signal_path, background_path, max_events):
-    df_sig = pd.read_pickle(signal_path)["gen"][VARS].copy()
-    df_bkg = pd.read_pickle(background_path)["gen"][VARS].copy()
+def load_data(signal_path, background_path, VARS, max_events):
+    # All base variables needed, plus any that are used in derived features
+    derived_vars = [
+        'gen_crk_ckr', 'gen_crk_ckr_m',
+        'gen_cnr_crn', 'gen_cnr_crn_m',
+        'gen_cnk_ckn', 'gen_cnk_ckn_m'
+    ]
+    base_vars = list(set(VARS) - set(derived_vars))
+    base_vars += ['gen_c_rk', 'gen_c_kr', 'gen_c_nr', 'gen_c_rn', 'gen_c_nk', 'gen_c_kn']
 
+    # Load only necessary base variables from "gen"
+    df_sig = pd.read_pickle(signal_path)["gen"][base_vars].copy()
+    df_bkg = pd.read_pickle(background_path)["gen"][base_vars].copy()
+
+    # Add derived variables
+    for df in [df_sig, df_bkg]:
+        df["gen_crk_ckr"]    = df["gen_c_rk"] + df["gen_c_kr"]
+        df["gen_crk_ckr_m"]  = df["gen_c_rk"] - df["gen_c_kr"]
+        df["gen_cnr_crn"]    = df["gen_c_nr"] + df["gen_c_rn"]
+        df["gen_cnr_crn_m"]  = df["gen_c_nr"] - df["gen_c_rn"]
+        df["gen_cnk_ckn"]    = df["gen_c_nk"] + df["gen_c_kn"]
+        df["gen_cnk_ckn_m"]  = df["gen_c_nk"] - df["gen_c_kn"]
+
+    # Sample
     df_sig = df_sig.sample(n=min(max_events, len(df_sig)), random_state=9)
     df_bkg = df_bkg.sample(n=min(max_events, len(df_bkg)), random_state=9)
 
+    # Labels
     df_sig["isSignal"] = 1
     df_bkg["isSignal"] = 0
 
+    # Split
     df_sig_train, df_sig_test = train_test_split(df_sig, test_size=0.1, random_state=9)
     df_bkg_train, df_bkg_test = train_test_split(df_bkg, test_size=0.1, random_state=9)
 
     df_train = pd.concat([df_sig_train, df_bkg_train])
     df_test_sig = pd.concat([df_sig_test])
     df_test_bkg = pd.concat([df_bkg_test])
-    df_combined = pd.concat([df_sig, df_bkg])  # For histogram-based LLR
+    df_combined = pd.concat([df_sig, df_bkg])
 
+    # Extract inputs and labels
     X = df_train[VARS].values
     Y = df_train["isSignal"].values
 
@@ -45,51 +65,44 @@ def load_data(signal_path, background_path, max_events):
 
     return X_train, Y_train, X_val, Y_val, X_sig_test, X_bkg_test, scaler, df_combined
 
+
+
 # Define model
 class EFTClassifier(nn.Module):
     def __init__(self, input_dim):
         super(EFTClassifier, self).__init__()
         layers = []
-        for _ in range(5):  # 5 hidden layers
+        for _ in range(3):
             layers += [
                 nn.Linear(input_dim, 100),
                 nn.ReLU(),
                 nn.BatchNorm1d(100),
-                nn.Dropout(0.25)
+                nn.Dropout(0.1)
             ]
-            input_dim = 100  # ensure next layer receives correct dim
-        layers.append(nn.Linear(100, 1))
-        layers.append(nn.Sigmoid())
+            input_dim = 100
+        layers.append(nn.Linear(100, 1))  # No sigmoid
         self.model = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.model(x)
 
-
 # Training
-
 def train_model(X_train, Y_train, X_val, Y_val, input_dim, n_epochs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EFTClassifier(input_dim).to(device)
-    criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    batch_size = 8192  # increased batch size
-
-    # Convert data to tensors only once
+    batch_size = 8192
     X_train_tensor = torch.from_numpy(X_train).float()
     Y_train_tensor = torch.from_numpy(Y_train).float().unsqueeze(1)
     X_val_tensor = torch.from_numpy(X_val).float()
     Y_val_tensor = torch.from_numpy(Y_val).float().unsqueeze(1)
 
-    # Create datasets and dataloaders with num_workers and pin_memory
     train_ds = TensorDataset(X_train_tensor, Y_train_tensor)
     val_ds = TensorDataset(X_val_tensor, Y_val_tensor)
-
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
-                              num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size,
-                            num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, num_workers=4, pin_memory=True)
 
     best_val_loss = float('inf')
     patience, epochs_no_improve = 10, 0
@@ -140,15 +153,11 @@ def train_model(X_train, Y_train, X_val, Y_val, input_dim, n_epochs):
     plt.figure(figsize=(10,5))
     plt.plot(train_losses, label='Train Loss')
     plt.plot(val_losses, label='Val Loss')
-    plt.yscale("log")
     plt.legend(); plt.grid(); plt.tight_layout(); plt.show()
 
     return model, device
 
-
-
-# Likelihood ratio plotting
-
+# Likelihood ratio plot
 def plot_llr_2d(model, scaler, vars_all, x_var, y_var, x_range, y_range, bins=60):
     xi, yi = vars_all.index(x_var), vars_all.index(y_var)
     xs = np.linspace(*x_range, bins)
@@ -157,14 +166,12 @@ def plot_llr_2d(model, scaler, vars_all, x_var, y_var, x_range, y_range, bins=60
 
     Xgrid = np.zeros((len(grid), len(vars_all)))
     Xgrid[:, xi], Xgrid[:, yi] = grid[:, 0], grid[:, 1]
-
-    #  Apply same scaling
     Xgrid_scaled = scaler.transform(Xgrid)
 
     inputs = torch.tensor(Xgrid_scaled, dtype=torch.float32).to(next(model.parameters()).device)
     model.eval()
     with torch.no_grad():
-        scores = model(inputs).cpu().numpy().flatten()
+        scores = torch.sigmoid(model(inputs)).cpu().numpy().flatten()
 
     r = scores / (1 - scores + 1e-9)
     log_r = np.log(r).reshape(bins, bins)
@@ -176,27 +183,33 @@ def plot_llr_2d(model, scaler, vars_all, x_var, y_var, x_range, y_range, bins=60
     plt.ylabel(r'$m_{t\bar{t}}$')
     plt.tight_layout()
     plt.show()
+    return scores, log_r
 
-# Plot score distributions
-
+# Score distribution plot
 def plot_scores(model, device, X_sig_test, X_bkg_test):
     model.eval()
     with torch.no_grad():
-        sig_scores = model(torch.tensor(X_sig_test, dtype=torch.float32).to(device)).cpu().numpy().flatten()
-        bkg_scores = model(torch.tensor(X_bkg_test, dtype=torch.float32).to(device)).cpu().numpy().flatten()
+        sig_logits = model(torch.tensor(X_sig_test, dtype=torch.float32).to(device))
+        bkg_logits = model(torch.tensor(X_bkg_test, dtype=torch.float32).to(device))
+
+        sig_scores = torch.sigmoid(sig_logits).cpu().numpy().flatten()
+        bkg_scores = torch.sigmoid(bkg_logits).cpu().numpy().flatten()
+
     plt.figure(figsize=(10, 6))
     plt.hist(sig_scores, bins=50, alpha=0.3, color='blue', label='EFT', density=True)
     plt.hist(bkg_scores, bins=50, alpha=0.3, color='red', label='SM', density=True)
-    #plt.yscale("log")
     plt.xlabel("DNN Score")
     plt.ylabel("Density")
+    #plt.yscale("log")
     plt.title("DNN Score Distribution")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+
     return sig_scores
-    
+
+# Histogram-based LLR
 def compute_histogram_llr(x_obs, y_obs, label_obs, x_range, y_range, bins=60):
     x_bins = np.linspace(*x_range, bins + 1)
     y_bins = np.linspace(*y_range, bins + 1)
@@ -211,7 +224,7 @@ def compute_histogram_llr(x_obs, y_obs, label_obs, x_range, y_range, bins=60):
     hist_sm, _, _ = np.histogram2d(x_obs[sm_mask], y_obs[sm_mask], bins=[x_bins, y_bins], density=True)
     hist_eft, _, _ = np.histogram2d(x_obs[eft_mask], y_obs[eft_mask], bins=[x_bins, y_bins], density=True)
 
-    epsilon = 1e-9  # slightly larger to suppress log-inf bins
+    epsilon = 1e-9
     ratio = np.log((hist_sm + epsilon) / (hist_eft + epsilon))
 
     plt.figure(figsize=(8, 6))
@@ -226,14 +239,15 @@ def compute_histogram_llr(x_obs, y_obs, label_obs, x_range, y_range, bins=60):
 
     return ratio
 
-    
+# Evaluation
 def evaluate_model(model, device, X_sig_test, X_bkg_test):
     model.eval()
     with torch.no_grad():
         X_sig_tensor = torch.tensor(X_sig_test, dtype=torch.float32).to(device)
         X_bkg_tensor = torch.tensor(X_bkg_test, dtype=torch.float32).to(device)
-        sig_scores = model(X_sig_tensor).cpu().numpy().flatten()
-        bkg_scores = model(X_bkg_tensor).cpu().numpy().flatten()
+
+        sig_scores = torch.sigmoid(model(X_sig_tensor)).cpu().numpy().flatten()
+        bkg_scores = torch.sigmoid(model(X_bkg_tensor)).cpu().numpy().flatten()
 
     scores = np.concatenate([sig_scores, bkg_scores])
     labels = np.concatenate([np.ones_like(sig_scores), np.zeros_like(bkg_scores)])
@@ -262,6 +276,3 @@ def evaluate_model(model, device, X_sig_test, X_bkg_test):
     plt.show()
 
     return fpr, tpr, roc_auc, cm
-
-
-
