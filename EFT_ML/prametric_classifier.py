@@ -159,7 +159,7 @@ def train_model(X_train, Y_train, X_val, Y_val, input_dim, n_epochs):
 
 # Likelihood ratio plot
 
-def plot_llr_2d(model, scaler, vars_all, x_var, y_var, x_range, y_range, bins=60):
+def plot_llr_2d(model, scaler, vars_all, x_var, y_var, x_range, y_range, bins=200):
     xi, yi = vars_all.index(x_var), vars_all.index(y_var)
     xs = np.linspace(*x_range, bins + 1)  # +1 for bin edges
     ys = np.linspace(*y_range, bins + 1)
