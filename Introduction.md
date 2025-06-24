@@ -8,20 +8,19 @@ To describe such indirect effects in a model-independent way, we use **Effective
 
 These operators are organized by how suppressed they are by a large energy scale \( \Lambda \), where new physics “lives.” The effects appear in an expansion like:
 
-\[
-\mathcal{L}_\text{EFT} = \mathcal{L}_\text{SM} + \frac{1}{\Lambda^2} \sum_i f_i \mathcal{O}_i + \dots
-\]
+L_EFT = L_SM + (1/Λ^2) ∑ f_i * O_i + ...
 
-- \( \mathcal{O}_i \): dimension-six operators  
-- \( f_i \): Wilson coefficients  
-- \( \Lambda \): the energy scale of new physics  
-- \( \mathcal{L}_\text{SM} \): Standard Model Lagrangian
 
-Since these effects are suppressed by \( 1/\Lambda^2 \), they become more pronounced as the ratio \( E/\Lambda \) (experiment energy over new physics scale) increases. The **smaller** this ratio, the **more reliable** EFT becomes.
+- `O_i`: dimension-six operators  
+- `f_i`: Wilson coefficients  
+- `Λ`: the energy scale of new physics  
+- `L_SM`: Standard Model Lagrangian
+
+Since these effects are suppressed by `1/Λ^2`, they become more pronounced as the ratio `E/Λ` (experiment energy over new physics scale) increases. The **smaller** this ratio, the **more reliable** EFT becomes.
 
 **Analogy:** Imagine a rock thrown into a lake:
-- The farther you are (larger \( \Lambda \)), the smaller the ripples you feel.
-- The closer you are (larger \( E/\Lambda \)), the more the ripples affect you—and the more you must account for higher-order terms.
+- The farther you are (larger `Λ`), the smaller the ripples you feel.
+- The closer you are (larger `E/Λ`), the more the ripples affect you—and the more you must account for higher-order terms.
 
 ---
 
@@ -36,7 +35,7 @@ EFT measurements at the LHC face three key challenges:
    The effects of EFTs appear in subtle patterns across many observables. Traditional analyses using just a few variables can miss important signals.
 
 3. **Intractable likelihood**  
-   Simulators like **Pythia** and **Geant4** are used to model particle collisions, parton showers, and detector responses. These tools can generate synthetic events but **do not provide an explicit formula** for the likelihood \( p(x|\theta) \) of observing a specific event \( x \) under theory \( \theta \).
+   Simulators like **Pythia** and **Geant4** are used to model particle collisions, parton showers, and detector responses. These tools can generate synthetic events but **do not provide an explicit formula** for the likelihood `p(x|θ)` of observing a specific event `x` under theory `θ`.
 
 ### Why Not?
 
@@ -55,16 +54,16 @@ Each stage involves:
 - Millions of hidden variables (e.g., decay paths, detector noise),
 - Is **not invertible** — you can’t deterministically trace an observed event back to the original theory.
 
-Mathematically, the likelihood is:
+The full likelihood is expressed as:
 
-\[
-p(x|\theta) = \int p(x|z) \cdot p(z|\theta) \, dz
-\]
+
+p(x|θ) = ∫ p(x|z) * p(z|θ) dz
+
 
 Where:
-- \( z \): parton-level variables (latent),
-- \( x \): observed event,
-- \( \theta \): EFT parameters.
+- `z`: parton-level variables (latent),
+- `x`: observed event,
+- `θ`: EFT parameters.
 
 This integral is **computationally intractable** because it sums over a vast space of latent variables.
 
@@ -105,16 +104,16 @@ To get around the intractable likelihood and the limitations of histograms, phys
 Here’s how it works in practice:
 
 1. Generate two sets of simulated events:
-   - One with EFT parameters \( \theta_0 \),
-   - Another with EFT parameters \( \theta_1 \).
+   - One with EFT parameters `θ₀`,
+   - Another with parameters `θ₁`.
 
 2. Train a **classifier** (like a neural network) to distinguish between the two.
 
 3. The classifier output can be transformed into an **approximate likelihood ratio**:
 
-\[
-\hat{r}(x \mid \theta_0, \theta_1) \approx \frac{p(x \mid \theta_1)}{p(x \mid \theta_0)}
-\]
+
+r̂(x | θ₀, θ₁) ≈ p(x | θ₁) / p(x | θ₀)
+
 
 This method:
 - Doesn’t require the likelihood to be known,
