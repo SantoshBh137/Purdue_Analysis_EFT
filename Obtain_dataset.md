@@ -70,6 +70,8 @@ Use `dasgoclient` to extract the first N file paths:
 
 ```bash
 dasgoclient -query="file dataset=/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL16NanoAODAPVv9-20UL16APVJMENano_106X_mcRun2_asymptotic_preVFP_v11-v1/NANOAODSIM" | head -n 15 > files.txt
+or
+dasgoclient -query="file dataset=/TTto2L2Nu-1Jets-smeft_MTT-0to700_TuneCP5_13TeV_madgraphMLM-pythia8/RunIISummer20UL16MiniAODAPVv2-106X_mcRun2_asymptotic_preVFP_v11-v2/MINIAODSIM" | head -n 2 > files.txt
 ```
 
 This saves the first 15 file paths to a local text file `files.txt`.
